@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Peta Interaktif dengan Pengukuran Jarak dan Azimuth</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-geometryutil/0.9.3/leaflet.geometryutil.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/leaflet-ant-path@1.3.0/dist/leaflet-ant-path.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6.5.0/turf.min.js"></script> <!-- Menambahkan pustaka Turf.js -->
+  <style>
+    #map {
+      height: 600px; /* Menentukan tinggi peta */
+      width: 100%;   /* Membuat peta memenuhi lebar kontainer */
+    }
+    .button-container {
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+
+<h3>Peta Interaktif dengan Pengukuran Jarak dan Sudut Azimuth</h3>
+<div id="map"></div>
+<p>
+  Jarak: <span id="distance">0</span> 
+  <select id="unit" onchange="updateDistanceDisplay()">
+    <option value="km" selected>km</option>
+    <option value="miles">miles</option>
+    <option value="feet">feet</option>
+  </select>
+</p>
+<h4>Azimuth dari Setiap Titik:</h4>
+<ul id="azimuthList"></ul> <!-- Menampilkan daftar sudut azimuth -->
+<div class="button-container">
+  <button onclick="resetMap()">Reset Peta</button>
+</div>
+<h4>Koordinat Titik:</h4>
+<ul id="coordinatesList"></ul> <!-- Menampilkan koordinat titik yang diklik -->
+
+<script>
+  // Membuat peta dan menetapkan titik pusatnya
+  const map = L.map('map').setView([-6.200000, 106.816666], 13);
+
+  // Menambahkan layer peta dari OpenStreetMap
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+  }).addTo(map);
+
+  let markers = [];
+  let lines = [];
+  let totalDistanceKm = 0; // Menyimpan jarak dalam kilometer sebagai nilai dasar
+
+  // Menambahkan marker saat peta diklik
+  map.on('click', function(e) {
+    const marker = L.marker(e.latlng).addTo(map);
+    markers.push(marker);
+
+    // Menampilkan koordinat titik yang diklik
+    const coordinatesList = document.getElementById('coordinatesList');
+    const listItem = document.createElement('li');
+    listItem.innerText = `Lat: ${e.latlng.lat.toFixed(6)}, Lng: ${e.latlng.lng.toFixed(6)}`;
+    coordinatesList.appendChild(listItem);
+
+    // Jika sudah lebih dari 2 titik, hitung jarak dan azimuth
+    if (markers.length >= 2) {
+      const latlngs = markers.map(m => m.getLatLng());
+
+      // Menghapus garis yang sudah digambar sebelumnya
+      lines.forEach(line => map.removeLayer(line));
+      lines = [];
+
+      // Menghitung total jarak dan menggambar garis lengkung antar titik
+      totalDistanceKm = 0;
+      for (let i = 0; i < latlngs.length - 1; i++) {
+        const distance = latlngs[i].distanceTo(latlngs[i + 1]) / 1000; // Menghitung jarak dalam km
+        totalDistanceKm += distance;
+
+        // Menggambar garis lengkung menggunakan Turf.js
+        var start = turf.point([latlngs[i].lng, latlngs[i].lat]);
+        var end = turf.point([latlngs[i + 1].lng, latlngs[i + 1].lat]);
+        var arc = turf.greatCircle(start, end, {steps: 500}); // Menghitung garis lengkung
+
+        var line = L.polyline(arc.geometry.coordinates.map(function(coord) {
+          return [coord[1], coord[0]]; // Menyesuaikan koordinat untuk Leaflet (lat, lng)
+        }), {color: 'red'}).addTo(map);
+
+        lines.push(line);
+      }
+
+      // Memperbarui tampilan jarak dengan satuan yang dipilih
+      updateDistanceDisplay();
+
+      // Menghitung dan menampilkan azimuth untuk setiap pasangan titik
+      const azimuthList = document.getElementById('azimuthList');
+      azimuthList.innerHTML = ''; // Menghapus daftar azimuth yang sudah ada
+
+      for (let i = 0; i < latlngs.length - 1; i++) {
+        const azimuth = calculateAzimuth(latlngs[i], latlngs[i + 1]);
+
+        // Menambahkan azimuth ke dalam daftar
+        const azimuthItem = document.createElement('li');
+        azimuthItem.innerText = `Titik ${i + 1} ke Titik ${i + 2}: ${azimuth.toFixed(2)}°`;
+        azimuthList.appendChild(azimuthItem);
+      }
+    }
+  });
+
+  // Fungsi untuk menghitung azimuth antara dua titik
+  function calculateAzimuth(p1, p2) {
+    const bearing = L.GeometryUtil.bearing(p1, p2);
+    const azimuth = (bearing + 360) % 360; // Memastikan azimuth selalu positif
+    return azimuth;
+  }
+
+  // Fungsi untuk memperbarui tampilan jarak berdasarkan satuan yang dipilih
+  function updateDistanceDisplay() {
+    const unit = document.getElementById('unit').value;
+    const distanceElement = document.getElementById('distance');
+
+    let convertedDistance;
+    switch (unit) {
+      case 'km':
+        convertedDistance = totalDistanceKm;
+        break;
+      case 'miles':
+        convertedDistance = totalDistanceKm * 0.621371; // Konversi km ke miles
+        break;
+      case 'feet':
+        convertedDistance = totalDistanceKm * 3280.84; // Konversi km ke feet
+        break;
+    }
+
+    distanceElement.innerText = convertedDistance.toFixed(2);
+  }
+
+  // Fungsi untuk mereset peta
+  function resetMap() {
+    markers.forEach(marker => map.removeLayer(marker));  // Menghapus semua marker
+    lines.forEach(line => map.removeLayer(line));        // Menghapus semua garis
+    markers = [];
+    lines = [];
+    totalDistanceKm = 0; // Reset jarak ke 0
+    document.getElementById('distance').innerText = "0"; // Reset jarak
+    document.getElementById('azimuthList').innerHTML = ""; // Hapus daftar azimuth
+    document.getElementById('coordinatesList').innerHTML = ""; // Hapus daftar koordinat
+  }
+</script>
+
+</body>
+</html>
